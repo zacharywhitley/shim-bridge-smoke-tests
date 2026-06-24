@@ -20,6 +20,14 @@ MOBILITYDB_SQLITE_BRIDGE ?= $(HOME)/git/mobilitydb-sqlite-bridge/target/release/
 POSTGIS_SHIM             ?= /tmp/postgis-shim-composed.wasm
 MOBILITYDB_SHIM          ?= /tmp/mobilitydb-composed.wasm
 
+# Optional preprocessor wiring. When SHIM_SQL_PREPROCESS is set,
+# scripts/run.sh pipes each case file through it (with the
+# corresponding interface DB) before sending to the target CLI.
+# Skip per-case via a `<case>.no-preprocess` marker file.
+SHIM_SQL_PREPROCESS      ?= $(HOME)/git/shim-sql-preprocess/target/release/shim-sql-preprocess
+POSTGIS_INTERFACE_DB     ?= /tmp/postgis-interface.sqlite
+MOBILITYDB_INTERFACE_DB  ?= /tmp/mobilitydb-interface.sqlite
+
 .PHONY: smoke postgis mobilitydb postgis-duckdb postgis-sqlite mobilitydb-duckdb mobilitydb-sqlite
 
 smoke: postgis mobilitydb
@@ -32,20 +40,30 @@ mobilitydb: mobilitydb-duckdb mobilitydb-sqlite
 
 postgis-duckdb:
 	@echo "=== postgis × duckdb ==="
-	@bash scripts/run.sh duckdb $(POSTGIS_DUCKDB_BRIDGE) $(POSTGIS_SHIM) cases/postgis
+	@SHIM_SQL_PREPROCESS=$(SHIM_SQL_PREPROCESS) \
+	 SHIM_INTERFACE_DB=$(POSTGIS_INTERFACE_DB) \
+	 bash scripts/run.sh duckdb $(POSTGIS_DUCKDB_BRIDGE) $(POSTGIS_SHIM) cases/postgis
 
 postgis-sqlite:
 	@echo "=== postgis × sqlite ==="
-	@bash scripts/run.sh sqlite $(POSTGIS_SQLITE_BRIDGE) $(POSTGIS_SHIM) cases/postgis
+	@SHIM_SQL_PREPROCESS=$(SHIM_SQL_PREPROCESS) \
+	 SHIM_INTERFACE_DB=$(POSTGIS_INTERFACE_DB) \
+	 bash scripts/run.sh sqlite $(POSTGIS_SQLITE_BRIDGE) $(POSTGIS_SHIM) cases/postgis
 	@if [ -d cases/postgis-sqlite-only ]; then \
 	    echo "=== postgis × sqlite (sqlite-only cases) ==="; \
+	    SHIM_SQL_PREPROCESS=$(SHIM_SQL_PREPROCESS) \
+	    SHIM_INTERFACE_DB=$(POSTGIS_INTERFACE_DB) \
 	    bash scripts/run.sh sqlite $(POSTGIS_SQLITE_BRIDGE) $(POSTGIS_SHIM) cases/postgis-sqlite-only; \
 	fi
 
 mobilitydb-duckdb:
 	@echo "=== mobilitydb × duckdb ==="
-	@bash scripts/run.sh duckdb $(MOBILITYDB_DUCKDB_BRIDGE) $(MOBILITYDB_SHIM) cases/mobilitydb
+	@SHIM_SQL_PREPROCESS=$(SHIM_SQL_PREPROCESS) \
+	 SHIM_INTERFACE_DB=$(MOBILITYDB_INTERFACE_DB) \
+	 bash scripts/run.sh duckdb $(MOBILITYDB_DUCKDB_BRIDGE) $(MOBILITYDB_SHIM) cases/mobilitydb
 
 mobilitydb-sqlite:
 	@echo "=== mobilitydb × sqlite ==="
-	@bash scripts/run.sh sqlite $(MOBILITYDB_SQLITE_BRIDGE) $(MOBILITYDB_SHIM) cases/mobilitydb
+	@SHIM_SQL_PREPROCESS=$(SHIM_SQL_PREPROCESS) \
+	 SHIM_INTERFACE_DB=$(MOBILITYDB_INTERFACE_DB) \
+	 bash scripts/run.sh sqlite $(MOBILITYDB_SQLITE_BRIDGE) $(MOBILITYDB_SHIM) cases/mobilitydb

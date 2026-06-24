@@ -85,6 +85,45 @@ for sql in "$case_dir"/*.sql; do
     # Prepend the loader to the SQL so the user's case files
     # don't have to know the load incantation.
     sql_with_loader="$(mktemp -t bridge-smoke.XXXXXX.sql)"
+    # Preprocess SQL through shim-sql-preprocess when:
+    #   - SHIM_SQL_PREPROCESS env var points at the binary, AND
+    #   - SHIM_INTERFACE_DB env var points at the matching
+    #     interface DB, AND
+    #   - the case file doesn't have a sibling `<case>.no-preprocess`
+    #     marker. Cases that don't need rewriting (i.e. the
+    #     existing 01..04 postgis cases) opt out via the marker.
+    if [[ -n "${SHIM_SQL_PREPROCESS:-}" \
+        && -n "${SHIM_INTERFACE_DB:-}" \
+        && ! -f "$case_dir/$name.no-preprocess" ]]
+    then
+        # Per-target dialect. sqlparser-rs's DuckDb dialect
+        # rejects some PG-style infix operators (`&&` etc.);
+        # postgres dialect handles them and the rewrite is
+        # dialect-neutral on the output.
+        case "$target" in
+            duckdb)  pp_dialect="postgres" ;;
+            sqlite)  pp_dialect="sqlite" ;;
+            *)       pp_dialect="generic" ;;
+        esac
+        rewritten="$(mktemp -t bridge-smoke.XXXXXX.rewritten.sql)"
+        if ! "$SHIM_SQL_PREPROCESS" \
+                --interface "$SHIM_INTERFACE_DB" \
+                --dialect "$pp_dialect" \
+                < "$sql" > "$rewritten" 2> "$rewritten.err"
+        then
+            echo "  FAIL $name  (preprocess error)"
+            sed 's/^/    /' "$rewritten.err"
+            rm -f "$rewritten" "$rewritten.err"
+            fail=$((fail+1))
+            failed_names+=("$name")
+            continue
+        fi
+        sql_input="$rewritten"
+        rm -f "$rewritten.err"
+    else
+        sql_input="$sql"
+    fi
+
     {
         printf '%s\n' "$loader"
         # SQLite needs `.mode list` + `.headers off` to produce
@@ -98,7 +137,7 @@ for sql in "$case_dir"/*.sql; do
                 printf '.mode csv\n.headers off\n'
                 ;;
         esac
-        cat "$sql"
+        cat "$sql_input"
     } > "$sql_with_loader"
 
     actual="$(mktemp -t bridge-smoke.XXXXXX.actual)"
