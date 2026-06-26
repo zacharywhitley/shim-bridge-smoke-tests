@@ -37,7 +37,26 @@ case "$target" in
         # the bare path (no quotes-in-path support, so resolve to
         # absolute first).
         bridge_abs="$(cd "$(dirname "$bridge_path")" && pwd)/$(basename "$bridge_path")"
-        loader=".load $bridge_abs"
+        # When the bridge is a .wasm file we route through
+        # sqlink-loader.dylib + sqlink_load_ext rather than a
+        # direct .load. The sqlink-loader path is taken from
+        # $SQLINK_LOADER (overrideable); the extension name from
+        # the case-dir basename ("postgis" / "mobilitydb").
+        if [[ "$bridge_abs" == *.wasm ]]; then
+            if [[ -z "${SQLINK_LOADER:-}" ]]; then
+                SQLINK_LOADER="$HOME/git/sqlink/target/release/libsqlink_loader.dylib"
+            fi
+            if [[ ! -f "$SQLINK_LOADER" ]]; then
+                echo "ERROR: SQLINK_LOADER=$SQLINK_LOADER not found" >&2
+                echo "       Build with: cd ~/git/sqlink && cargo build --release -p sqlink-loader" >&2
+                exit 2
+            fi
+            base="$(basename "$case_dir")"
+            ext_name="${base%%-*}"
+            loader=".load $SQLINK_LOADER"$'\n'"SELECT sqlink_load_ext('$ext_name', '$bridge_abs');"
+        else
+            loader=".load $bridge_abs"
+        fi
         ;;
     duckdb)
         cli="${DUCKDB:-duckdb}"
@@ -163,6 +182,7 @@ for sql in "$case_dir"/*.sql; do
         -e '/^\[shim-/d' \
         -e '/-duckdb-bridge: /d' \
         -e '/-sqlite-bridge: /d' \
+        -e '/^loaded [a-z]*: [0-9]* scalar/d' \
         "$actual" \
         | awk 'NR==1 || /./{print prev} {prev=$0} END{if(prev!="") print prev}' \
         > "$norm_actual"
