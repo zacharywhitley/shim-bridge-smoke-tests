@@ -35,14 +35,11 @@ case "$target" in
         fi
         # SQLite needs the env var to find the shim; .load takes
         # the bare path (no quotes-in-path support, so resolve to
-        # absolute first).
-        bridge_abs="$(cd "$(dirname "$bridge_path")" && pwd)/$(basename "$bridge_path")"
-        # When the bridge is a .wasm file we route through
-        # sqlink-loader.dylib + sqlink_load_ext rather than a
-        # direct .load. The sqlink-loader path is taken from
-        # $SQLINK_LOADER (overrideable); the extension name from
-        # the case-dir basename ("postgis" / "mobilitydb").
-        if [[ "$bridge_abs" == *.wasm ]]; then
+        # absolute first). A colon-separated bridge_path loads
+        # multiple bridges in order — required for mobilitydb,
+        # which depends on postgis's GEOMETRY type having loaded
+        # first (D5 load-order convention).
+        if [[ "$bridge_path" == *.wasm* ]]; then
             if [[ -z "${SQLINK_LOADER:-}" ]]; then
                 SQLINK_LOADER="$HOME/git/sqlink/target/release/libsqlink_loader.dylib"
             fi
@@ -51,10 +48,36 @@ case "$target" in
                 echo "       Build with: cd ~/git/sqlink && cargo build --release -p sqlink-loader" >&2
                 exit 2
             fi
-            base="$(basename "$case_dir")"
-            ext_name="${base%%-*}"
-            loader=".load $SQLINK_LOADER"$'\n'"SELECT sqlink_load_ext('$ext_name', '$bridge_abs');"
+            loader=".load $SQLINK_LOADER"
+            IFS=':' read -r -a bridge_paths <<< "$bridge_path"
+            for bp in "${bridge_paths[@]}"; do
+                bp_abs="$(cd "$(dirname "$bp")" && pwd)/$(basename "$bp")"
+                # Derive the extension name from the wasm filename,
+                # stripping the canonical `-sqlink-loadable.wasm`
+                # suffix. Falls back to the basename minus the
+                # `.wasm` extension. For chained loads (postgis +
+                # mobilitydb) each load uses its own name so the
+                # bridge registers under the right identity.
+                bp_base="$(basename "$bp")"
+                case "$bp_base" in
+                    *-sqlink-loadable.wasm)
+                        ext_name="${bp_base%-sqlink-loadable.wasm}"
+                        ;;
+                    *.wasm)
+                        ext_name="${bp_base%.wasm}"
+                        ;;
+                    *)
+                        # Last-resort: case-dir basename, first `-`-segment.
+                        base="$(basename "$case_dir")"
+                        ext_name="${base%%-*}"
+                        ;;
+                esac
+                loader+=$'\n'"SELECT sqlink_load_ext('$ext_name', '$bp_abs');"
+            done
+            # Last bridge is the "primary" for diagnostic context.
+            bridge_abs="$(cd "$(dirname "${bridge_paths[-1]}")" && pwd)/$(basename "${bridge_paths[-1]}")"
         else
+            bridge_abs="$(cd "$(dirname "$bridge_path")" && pwd)/$(basename "$bridge_path")"
             loader=".load $bridge_abs"
         fi
         ;;

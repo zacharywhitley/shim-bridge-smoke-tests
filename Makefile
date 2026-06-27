@@ -14,9 +14,13 @@
 #   MOBILITYDB_SHIM         — mobilitydb composed shim wasm
 
 POSTGIS_DUCKDB_BRIDGE    ?= /tmp/postgis_duckdb_bridge.duckdb_extension
-POSTGIS_SQLITE_BRIDGE    ?= $(HOME)/git/postgis-sqlite-bridge/target/release/libpostgis_sqlite_bridge.dylib
+POSTGIS_SQLITE_BRIDGE    ?= $(HOME)/git/postgis-sqlink-bridge/postgis-sqlink-loadable.wasm
 MOBILITYDB_DUCKDB_BRIDGE ?= /tmp/mobilitydb_duckdb_bridge.duckdb_extension
-MOBILITYDB_SQLITE_BRIDGE ?= $(HOME)/git/mobilitydb-sqlite-bridge/target/release/libmobilitydb_sqlite_bridge.dylib
+# mobilitydb's wasm bridge needs postgis loaded first for the
+# GEOMETRY type (D5 load-order convention). The colon-separated
+# path is decoded by scripts/run.sh into two sqlink_load_ext
+# calls in the listed order.
+MOBILITYDB_SQLITE_BRIDGE ?= $(HOME)/git/postgis-sqlink-bridge/postgis-sqlink-loadable.wasm:$(HOME)/git/mobilitydb-sqlink-bridge/mobilitydb-sqlink-loadable.wasm
 POSTGIS_SHIM             ?= /tmp/postgis-shim-composed.wasm
 MOBILITYDB_SHIM          ?= /tmp/mobilitydb-composed.wasm
 
